@@ -183,9 +183,22 @@ def preflight_checks(skip_clean_check=False, root_dir=None):
             print("[FAIL] ocrmypdf: Not found")
             report_data['preflight']['ocrmypdf'] = 'MISSING'
             all_ok = False
+        
+        # Check Tesseract (required by ocrmypdf)
+        tesseract_path = shutil.which('tesseract') or (Path('C:\\Program Files\\Tesseract-OCR\\tesseract.exe') if Path('C:\\Program Files\\Tesseract-OCR\\tesseract.exe').exists() else None)
+        if tesseract_path:
+            print("[OK] Tesseract OCR: Installed")
+            report_data['preflight']['tesseract'] = 'OK'
+        else:
+            print("[FAIL] Tesseract OCR: Not found (required by ocrmypdf)")
+            print("       Install: winget install --id UB-Mannheim.TesseractOCR")
+            report_data['preflight']['tesseract'] = 'MISSING'
+            all_ok = False
     else:
         print("[SKIP] ocrmypdf: Not required for this phase")
         report_data['preflight']['ocrmypdf'] = 'SKIPPED'
+        print("[SKIP] Tesseract OCR: Not required for this phase")
+        report_data['preflight']['tesseract'] = 'SKIPPED'
     
     # Check Ghostscript (skip for convert/format/verify phases)
     if not skip_clean_check:
@@ -376,7 +389,7 @@ def phase1_directory(root_dir):
             
             # Try normal move first
             shutil.move(source_str, target_str)
-            print(f"[OK] Moved: {pdf.name} → {new_name}")
+            print(f"[OK] Moved: {pdf.name} -> {new_name}")
             moved_count += 1
             
         except (OSError, FileNotFoundError) as e:
@@ -694,7 +707,7 @@ def phase2_rename(root_dir):
         used_names.add(new_name)
         target_path = renamed_dir / new_name
         shutil.copy2(str(pdf), str(target_path))
-        print(f"  [OK] Renamed: {pdf.name} → {new_name}")
+        print(f"  [OK] Renamed: {pdf.name} -> {new_name}")
         report_data['rename'].append({'original': pdf.name, 'renamed': new_name})
     
     print(f"\n[OK] Renamed {len(pdf_files)} files")
@@ -832,7 +845,7 @@ def _enhance_page1_header(pdf_path, output_path):
         new_doc.close()
         doc.close()
         
-        print(f"  → Enhanced page 1 at 1152 DPI for header OCR")
+        print(f"  -> Enhanced page 1 at 1152 DPI for header OCR")
         return str(temp_enhanced)
         
     except Exception as e:
@@ -855,9 +868,9 @@ def _process_clean_pdf(pdf_path, clean_dir):
         
         ocrmypdf_cmd = shutil.which('ocrmypdf') or 'C:\\DevWorkspace\\.venv\\Scripts\\ocrmypdf.exe'
         
-        # Try basic OCR first
-        cmd = [ocrmypdf_cmd, '--force-ocr', '--output-type', 'pdfa',
-               '--oversample', '600',
+        # Try basic OCR first with skip-text to ignore existing text
+        cmd = [ocrmypdf_cmd, '--skip-text', '--output-type', 'pdfa',
+               '--oversample', '600', '--optimize', '3',
                str(pdf_path), str(output_path)]
         
         success, out = run_subprocess(cmd)
@@ -875,7 +888,7 @@ def _process_clean_pdf(pdf_path, clean_dir):
                 good_quality = len(page1_text) > 100
                 
                 if good_quality:
-                    print(f"  → Fast OCR successful ({len(page1_text)} chars on page 1)")
+                    print(f"  -> Fast OCR successful ({len(page1_text)} chars on page 1)")
                     success = True
                 else:
                     print(f"  [WARN] Fast OCR produced little text ({len(page1_text)} chars), trying preprocessing")
@@ -957,7 +970,7 @@ def _process_clean_pdf(pdf_path, clean_dir):
             new_doc.save(str(temp_preprocessed))
             new_doc.close()
             
-            print(f"  → Preprocessed {len(temp_images)} pages")
+            print(f"  -> Preprocessed {len(temp_images)} pages")
             
             # Clean up temp images
             for img_path in temp_images:
@@ -1007,20 +1020,20 @@ def _process_clean_pdf(pdf_path, clean_dir):
                     
                     # Only use compressed version if it's significantly smaller (>10% reduction)
                     if reduction > 10:
-                        print(f"  → Compressed {original_size:,} → {compressed_size:,} bytes ({reduction:.1f}% reduction)")
+                        print(f"  -> Compressed {original_size:,} -> {compressed_size:,} bytes ({reduction:.1f}% reduction)")
                         compressed_path.replace(output_path)
                         return ProcessingResult(
                             file_name=output_path.name,
                             status='OK',
-                            metadata={'compression': f"{original_size:,} → {compressed_size:,} bytes ({reduction:.1f}% reduction)"}
+                            metadata={'compression': f"{original_size:,} -> {compressed_size:,} bytes ({reduction:.1f}% reduction)"}
                         )
                     else:
-                        print(f"  → Compression only {reduction:.1f}%, keeping original size")
+                        print(f"  -> Compression only {reduction:.1f}%, keeping original size")
                         if compressed_path.exists():
                             compressed_path.unlink()
                         return ProcessingResult(file_name=output_path.name, status='OK')
                 else:
-                    print(f"  → Compression failed, keeping original")
+                    print(f"  -> Compression failed, keeping original")
                     return ProcessingResult(file_name=output_path.name, status='OK')
                 
             except Exception as e:
@@ -1544,7 +1557,8 @@ def _process_format_file(txt_file, formatted_dir, prompt):
                     generation_config=genai.types.GenerationConfig(
                         temperature=0.1,
                         max_output_tokens=MAX_OUTPUT_TOKENS
-                    )
+                    ),
+                    request_options={'timeout': 300}
                 )
                 cleaned_chunks.append(response.text.strip())
             
@@ -1657,7 +1671,7 @@ END OF PROCESSED DOCUMENT
             with open(output_path, 'w', encoding='utf-8') as f:
                 f.write(formatted_content)
             
-            print(f"[OK] Imported: {txt_file.name} → {output_path.name}")
+            print(f"[OK] Imported: {txt_file.name} -> {output_path.name}")
             imported_count += 1
             
         except Exception as e:
@@ -2003,7 +2017,7 @@ def phase6_gcs_upload(root_dir, force_reupload=False):
             
             # Upload new file
             if force_reupload or not blob.exists():
-                print(f"\n[UPLOAD] {pdf_path.name} → gs://{GCS_BUCKET}/{blob_name}")
+                print(f"\n[UPLOAD] {pdf_path.name} -> gs://{GCS_BUCKET}/{blob_name}")
                 blob.upload_from_filename(str(pdf_path))
                 blob.make_public()
                 uploaded_count += 1
@@ -2447,7 +2461,7 @@ def phase7_verify(root_dir, auto_repair=False):
             doc.close()
             
             # CONTENT VALIDATION: Compare actual text
-            print(f"  → Extracting PDF text samples for comparison...")
+            print(f"  -> Extracting PDF text samples for comparison...")
             pdf_samples = extract_pdf_text_sample(pdf_file, [0, -1])  # First and last page
             
             content_matches = []
@@ -2461,7 +2475,7 @@ def phase7_verify(root_dir, auto_repair=False):
                     if not comparison["match"]:
                         content_issues.append(f"Page {page_num + 1}: {comparison['reason']}")
                     
-                    print(f"  → Page {page_num + 1}: {'✓' if comparison['match'] else '✗'} (confidence: {comparison.get('confidence', 0):.0%})")
+                    print(f"  -> Page {page_num + 1}: {'[OK]' if comparison['match'] else '[FAIL]'} (confidence: {comparison.get('confidence', 0):.0%})")
             
             # Calculate overall content confidence
             if content_matches:
@@ -3518,140 +3532,140 @@ def print_phase_overview():
     print("="*80)
     
     print("\nPHASE 1: DIRECTORY - ORIGINAL PDF COLLECTION")
-    print("─" * 80)
+    print("-" * 80)
     print("  Step 1.1: Verify directory structure")
-    print("    • Check for 01_doc-original, 02_doc-renamed, 03-07 directories")
-    print("    • Create missing directories if needed")
+    print("    * Check for 01_doc-original, 02_doc-renamed, 03-07 directories")
+    print("    * Create missing directories if needed")
     print("  Step 1.2: Move PDFs from root to 01_doc-original")
-    print("    • Find all *.pdf files in root directory")
-    print("    • Remove existing suffixes (_o, _d, _r, _a, _t, _c, _v22, _v31)")
-    print("    • Add _d suffix (document/original)")
-    print("    • Move to 01_doc-original/")
-    print("  Output: *_d.pdf → 01_doc-original/")
+    print("    * Find all *.pdf files in root directory")
+    print("    * Remove existing suffixes (_o, _d, _r, _a, _t, _c, _v22, _v31)")
+    print("    * Add _d suffix (document/original)")
+    print("    * Move to 01_doc-original/")
+    print("  Output: *_d.pdf -> 01_doc-original/")
     
     print("\nPHASE 2: RENAME - ADD DATE PREFIX, PRESERVE ORIGINAL NAME")
-    print("─" * 80)
+    print("-" * 80)
     print("  Step 2.1: Extract date from filename or PDF content")
-    print("    • Check if filename has YYYYMMDD date prefix")
-    print("    • Parse common date formats (MM.DD.YY, MM-DD-YY, etc.)")
-    print("    • Use Gemini API to extract date from PDF first page if needed")
+    print("    * Check if filename has YYYYMMDD date prefix")
+    print("    * Parse common date formats (MM.DD.YY, MM-DD-YY, etc.)")
+    print("    * Use Gemini API to extract date from PDF first page if needed")
     print("  Step 2.2: Clean and standardize filename")
-    print("    • Remove date patterns from filename")
-    print("    • Replace spaces with underscores")
-    print("    • Remove special characters")
-    print("    • Handle compilations with RR_ prefix")
+    print("    * Remove date patterns from filename")
+    print("    * Replace spaces with underscores")
+    print("    * Remove special characters")
+    print("    * Handle compilations with RR_ prefix")
     print("  Step 2.3: Build new filename and deduplicate")
-    print("    • Format: YYYYMMDD_CleanedName_r.pdf")
-    print("    • Add counter suffix if duplicate name exists")
-    print("    • Copy to 02_doc-renamed/")
-    print("  Output: *_r.pdf → 02_doc-renamed/")
+    print("    * Format: YYYYMMDD_CleanedName_r.pdf")
+    print("    * Add counter suffix if duplicate name exists")
+    print("    * Copy to 02_doc-renamed/")
+    print("  Output: *_r.pdf -> 02_doc-renamed/")
     print("  Tools: Gemini 2.5 Pro API")
     
     print("\nPHASE 3: CLEAN - PDF ENHANCEMENT (600 DPI, PDF/A)")
-    print("─" * 80)
+    print("-" * 80)
     print("  Step 3.1: Clean metadata/annotations [PyMuPDF]")
-    print("    • Remove all metadata fields")
-    print("    • Delete annotations (highlights, comments, stamps)")
-    print("    • Remove bookmarks/outline")
-    print("    • Save to temp: *_metadata_cleaned.pdf")
+    print("    * Remove all metadata fields")
+    print("    * Delete annotations (highlights, comments, stamps)")
+    print("    * Remove bookmarks/outline")
+    print("    * Save to temp: *_metadata_cleaned.pdf")
     print("  Step 3.2: OCR cleaned file [ocrmypdf]")
-    print("    • Input: *_metadata_cleaned.pdf (from Step 3.1)")
-    print("    • OCR with 600 DPI oversample")
-    print("    • Output as PDF/A format")
-    print("    • Fallback: Ghostscript flatten or copy if OCR fails")
+    print("    * Input: *_metadata_cleaned.pdf (from Step 3.1)")
+    print("    * OCR with 600 DPI oversample")
+    print("    * Output as PDF/A format")
+    print("    * Fallback: Ghostscript flatten or copy if OCR fails")
     print("  Step 3.3: Delete temporary metadata file")
-    print("    • Remove *_metadata_cleaned.pdf")
+    print("    * Remove *_metadata_cleaned.pdf")
     print("  Step 3.4: Compress for online access [Ghostscript]")
-    print("    • /ebook settings (150 DPI images)")
-    print("    • Only keep if >10% size reduction")
-    print("    • Cleanup: *_compressed_temp.pdf")
-    print("  Output: *_o.pdf → 03_doc-clean/")
+    print("    * /ebook settings (150 DPI images)")
+    print("    * Only keep if >10% size reduction")
+    print("    * Cleanup: *_compressed_temp.pdf")
+    print("  Output: *_o.pdf -> 03_doc-clean/")
     print("  Tools: PyMuPDF (fitz), ocrmypdf 16.11.1, Ghostscript")
     print("  Processing: Large files (>5MB) sequential, smaller files parallel (5 workers)")
     
     print("\nPHASE 4: CONVERT - TEXT EXTRACTION")
-    print("─" * 80)
+    print("-" * 80)
     print("  Step 4.1: Extract text with Google Cloud Vision API")
-    print("    • Batch process PDFs for efficiency")
-    print("    • Handle large documents (>80 pages) with chunking")
-    print("    • Extract raw text from OCR'd PDFs")
+    print("    * Batch process PDFs for efficiency")
+    print("    * Handle large documents (>80 pages) with chunking")
+    print("    * Extract raw text from OCR'd PDFs")
     print("  Step 4.2: Save raw extracted text")
-    print("    • Output: *_c.txt → 04_doc-convert/")
-    print("  Output: *_c.txt → 04_doc-convert/")
+    print("    * Output: *_c.txt -> 04_doc-convert/")
+    print("  Output: *_c.txt -> 04_doc-convert/")
     print("  Tools: Google Cloud Vision API (Batch OCR)")
     print("  Processing: Parallel (5 workers)")
     
     print("\nPHASE 5: FORMAT - AI-POWERED TEXT FORMATTING")
-    print("─" * 80)
+    print("-" * 80)
     print("  Step 5.1: Clean and format text with Gemini")
-    print("    • Fix OCR errors and spacing issues")
-    print("    • Preserve [BEGIN PDF Page N] markers")
-    print("    • Remove headers/footers (page numbers, case info)")
-    print("    • Remove duplicate lines and whitespace")
-    print("    • Standardize formatting for legal documents")
+    print("    * Fix OCR errors and spacing issues")
+    print("    * Preserve [BEGIN PDF Page N] markers")
+    print("    * Remove headers/footers (page numbers, case info)")
+    print("    * Remove duplicate lines and whitespace")
+    print("    * Standardize formatting for legal documents")
     print("  Step 5.2: Handle large documents with chunking")
-    print("    • Split documents >80 pages into chunks")
-    print("    • Process chunks in parallel")
-    print("    • Reassemble with page markers intact")
+    print("    * Split documents >80 pages into chunks")
+    print("    * Process chunks in parallel")
+    print("    * Reassemble with page markers intact")
     print("  Step 5.3: Save formatted text")
-    print("    • Output: *_v31.txt → 05_doc-format/")
-    print("  Output: *_v31.txt → 05_doc-format/")
+    print("    * Output: *_v31.txt -> 05_doc-format/")
+    print("  Output: *_v31.txt -> 05_doc-format/")
     print("  Tools: Gemini 2.5 Pro (Temperature 0.1 for consistency)")
     print("  Processing: Parallel chunks (5 workers)")
     
     print("\nPHASE 6: GCS UPLOAD - CLOUD STORAGE")
-    print("─" * 80)
+    print("-" * 80)
     print("  Step 6.1: Delete existing files in GCS bucket (if any)")
-    print("    • Check for existing files with same name")
-    print("    • Delete old versions to prevent stale links")
+    print("    * Check for existing files with same name")
+    print("    * Delete old versions to prevent stale links")
     print("  Step 6.2: Upload PDF to Google Cloud Storage")
-    print("    • Bucket: fremont-1")
-    print("    • Path: docs/<directory-name>/")
-    print("    • Make publicly accessible")
+    print("    * Bucket: fremont-1")
+    print("    * Path: docs/<directory-name>/")
+    print("    * Make publicly accessible")
     print("  Step 6.3: Update formatted text file headers")
-    print("    • Add directory path header")
-    print("    • Add public GCS URL for PDF")
-    print("    • Preserve existing content and page markers")
+    print("    * Add directory path header")
+    print("    * Add public GCS URL for PDF")
+    print("    * Preserve existing content and page markers")
     print("  Output: Public URLs added to *_v31.txt headers")
     print("  Tools: Google Cloud Storage API")
     print("  Processing: Sequential (API rate limits)")
     
     print("\nPHASE 7: VERIFY - COMPREHENSIVE VALIDATION")
-    print("─" * 80)
+    print("-" * 80)
     print("  Step 7.1: Validate PDF metadata")
-    print("    • Count pages in original PDF")
-    print("    • Verify file sizes (original vs compressed)")
-    print("    • Calculate compression percentage")
+    print("    * Count pages in original PDF")
+    print("    * Verify file sizes (original vs compressed)")
+    print("    * Calculate compression percentage")
     print("  Step 7.2: Verify formatted text content")
-    print("    • Count [BEGIN PDF Page N] markers")
-    print("    • Verify page 1 marker present")
-    print("    • Verify character count >0")
+    print("    * Count [BEGIN PDF Page N] markers")
+    print("    * Verify page 1 marker present")
+    print("    * Verify character count >0")
     print("  Step 7.3: Verify GCS links and directory paths")
-    print("    • Check directory path matches filename")
-    print("    • Extract PDF name from GCS URL")
-    print("    • Verify URL matches filename")
+    print("    * Check directory path matches filename")
+    print("    * Extract PDF name from GCS URL")
+    print("    * Verify URL matches filename")
     print("  Step 7.4: Generate verification reports")
-    print("    • VERIFICATION_REPORT.txt (detailed results)")
-    print("    • PDF_MANIFEST.csv (all files summary)")
+    print("    * VERIFICATION_REPORT.txt (detailed results)")
+    print("    * PDF_MANIFEST.csv (all files summary)")
     print("  Output: Verification reports and status for each file")
     print("  Status Levels: [OK], [WARN], [FAILED]")
     
     print("\n" + "="*80)
     print("TOOLS VERIFICATION:")
-    print("─" * 80)
+    print("-" * 80)
     # Show tool status from preflight checks
     print("  Phase 0 (Preflight):")
-    print("    ✓ Root directory: Accessible and writable")
-    print("    ✓ Pipeline directories: Created or verified (01-05, y_logs)")
-    print("    ✓ Network drive detection: Warns if G:\\ or UNC path")
+    print("    [OK] Root directory: Accessible and writable")
+    print("    [OK] Pipeline directories: Created or verified (01-05, y_logs)")
+    print("    [OK] Network drive detection: Warns if G:\\ or UNC path")
     print("  Phase 3 Requirements:")
-    print("    ✓ PyMuPDF (fitz): Metadata and annotation removal")
-    print("    ✓ ocrmypdf: 600 DPI OCR with PDF/A output")
-    print("    ✓ Ghostscript: PDF compression (/ebook settings)")
+    print("    [OK] PyMuPDF (fitz): Metadata and annotation removal")
+    print("    [OK] ocrmypdf: 600 DPI OCR with PDF/A output")
+    print("    [OK] Ghostscript: PDF compression (/ebook settings)")
     print("  Phase 4-6 Requirements:")
-    print("    ✓ Google Cloud Vision API: Batch text extraction")
-    print("    ✓ Gemini 2.5 Pro API: AI-powered text formatting")
-    print("    ✓ Google Cloud Storage API: Public file hosting")
+    print("    [OK] Google Cloud Vision API: Batch text extraction")
+    print("    [OK] Gemini 2.5 Pro API: AI-powered text formatting")
+    print("    [OK] Google Cloud Storage API: Public file hosting")
     print("="*80 + "\n")
 
 # === MAIN PIPELINE ===
@@ -3734,7 +3748,9 @@ def main():
                 phase_functions[phase_name](root_dir)
             print(f"[DONE] Completed {phase_name} phase")
         except KeyboardInterrupt:
-            print(f"\n[STOP] User cancelled {phase_name} phase - continuing to next phase")
+            print(f"\n[WARN] Received interrupt signal during {phase_name} phase")
+            print(f"[INFO] Phase may have completed - check output files")
+            print(f"[INFO] Continuing to next phase...")
             continue
         except Exception as e:
             print(f"\n[ERROR] Phase {phase_name} failed with error: {e}")

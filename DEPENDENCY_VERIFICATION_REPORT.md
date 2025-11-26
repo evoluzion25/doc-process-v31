@@ -14,6 +14,7 @@
 
 ### External Tools
 - ✅ **ocrmypdf**: 16.12.0 - PDF OCR processing at 600+ DPI
+- ✅ **Tesseract OCR**: 5.4.0 - OCR engine (required by ocrmypdf)
 - ✅ **Ghostscript**: 10.03.0 - PDF compression and optimization
 
 ### Python Environment
@@ -95,10 +96,16 @@ C:\DevWorkspace\.venv\Scripts\python.exe doc-process-v31.py --dir "new\path" --p
 
 ### If ocrmypdf fails:
 ```powershell
-# Check installation
+# Check ocrmypdf installation
 C:\DevWorkspace\.venv\Scripts\ocrmypdf.exe --version
 
-# Reinstall if needed
+# Check Tesseract installation (required dependency)
+tesseract --version
+
+# Install Tesseract if missing
+winget install --id UB-Mannheim.TesseractOCR
+
+# Reinstall ocrmypdf if needed
 C:\DevWorkspace\.venv\Scripts\python.exe -m pip uninstall ocrmypdf -y
 C:\DevWorkspace\.venv\Scripts\python.exe -m pip install ocrmypdf
 ```

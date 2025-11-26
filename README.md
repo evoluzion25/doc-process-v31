@@ -8,6 +8,34 @@ Complete 7-phase pipeline for legal document processing with parallel execution,
 
 ## What's New in v31
 
+### API Timeout and Error Handling Improvements (November 26, 2025)
+- **Gemini API timeouts**: Added 5-minute (300s) timeout to all Gemini API calls
+  - Prevents indefinite hangs on slow/stuck API requests
+  - Applies to both chunked and single-document processing
+  - Timeout error triggers proper exception handling
+- **Improved interrupt handling**: Better KeyboardInterrupt detection and reporting
+  - Changed from "[STOP] User cancelled" to "[WARN] Received interrupt signal"
+  - Added "[INFO] Phase may have completed - check output files" message
+  - Reduces false alarms from ThreadPoolExecutor signal handling
+  - User can verify actual completion by checking output files
+- **Root cause analysis**: ThreadPoolExecutor receives signals during phase transitions
+  - Not actual user cancellation in most cases
+  - Files complete successfully despite interrupt message
+  - Verification phase reports actual status
+
+### Tesseract OCR Integration (November 26, 2025)
+- **Enhanced preflight checks**: Now explicitly verifies Tesseract OCR installation
+  - Checks both ocrmypdf AND its Tesseract dependency
+  - Provides installation instructions if Tesseract missing
+  - Command: `winget install --id UB-Mannheim.TesseractOCR`
+  - Prevents silent OCR failures from missing dependencies
+- **Dependency verification**: Added Tesseract to DEPENDENCY_VERIFICATION_REPORT.md
+- **PATH configuration**: Automatically adds Tesseract to PATH when running
+- **Unicode encoding fixes**: Replaced all Unicode characters with ASCII for PowerShell compatibility
+  - Changed → to ->, • to *, ✓ to [OK]
+  - Prevents encoding errors in Windows cp1252 terminal
+  - 20+ replacements throughout print statements
+
 ### Backup System Removed (November 10, 2025)
 - **Simplified workflow**: Removed automatic backup system to improve performance
 - **Direct processing**: Files now processed directly without creating timestamped backups
